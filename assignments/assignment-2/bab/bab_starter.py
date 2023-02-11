@@ -9,7 +9,10 @@ import math
 
 counter = itertools.count()
 
-class BBTreeNode():
+y = RealVariable("y")
+
+
+class BBTreeNode:
     """
     Creates and handles a BBTreeNode object that can branch and bound
     to determine the optimal result and corresponding best variable
@@ -26,7 +29,7 @@ class BBTreeNode():
             using constraints, vars, and objective.
     """
 
-    def __init__(self, vars = [], constraints = [], objective='', prob=None):
+    def __init__(self, vars=[], constraints=[], objective="", prob=None):
         """
         Initializes BBTreeNode.
         """
@@ -55,9 +58,9 @@ class BBTreeNode():
             self.prob (picos Problem object): problem created from
                 constraints, objective, and vars.
         """
-        prob=pic.Problem()
+        prob = pic.Problem()
         prob.add_list_of_constraints(self.constraints)
-        prob.set_objective('max', self.objective)
+        prob.set_objective("max", self.objective)
         self.prob = prob
         return self.prob
 
@@ -85,7 +88,7 @@ class BBTreeNode():
         Returns:
             n1 (BBTreeNode object): child where xi <= floor(xi).
         """
-        n1 = deepcopy(self)
+        n1 = self.__deepcopy__()
         # add in the new binary constraint
         n1.prob.add_constraint(branch_var <= math.floor(branch_var.value))
         return n1
@@ -100,7 +103,7 @@ class BBTreeNode():
         Returns:
             n2 (BBTreeNode object): child where xi >= ceiling(xi).
         """
-        n2 = deepcopy(self)
+        n2 = self.__deepcopy__()
         # add in the new binary constraint
         n2.prob.add_constraint(branch_var >= math.ceil(branch_var.value))
         return n2
@@ -116,14 +119,81 @@ class BBTreeNode():
         """
         # these lines build up the initial problem and add it to a heap
         root = self
-        res = root.buildProblem().solve(solver='cvxopt')
+        res = root.buildProblem().solve(solver="cvxopt")
         heap = [(res, next(counter), root)]
         # set bestres to an arbitrary small initial best objective value
         bestres = -1e20
         # initialize bestnode_vars to the root vars
         bestnode_vars = root.vars
+        # TODO:
 
-        #TODO:
-        # Implement your solution here!
+        # Create an iteration variable less than the length of the heap
+        iterator = 0
+        while iterator < len(heap):
+            maximum_tolerance = 0
 
+            # Check if the constraints are valid for finding an IP solution
+            if heap[iterator][2] not in ["infeasible", "unbounded"]:
+
+                # Adds the maximum calculate values for constraints and
+                # objective function if the numbers are integers
+                if heap[iterator][2].is_integral():
+                    if bestnode_vars[-1] < root.vars[-1]:
+                        bestres = res
+                        bestnode_vars = root.vars
+
+                # If the numbers aren't integers, then B&B must be applied
+                else:
+                    # Calculates the variance from the closest integer of a variable
+                    for i in range(len(heap[iterator][2].vars) - 1):
+                        tolerance = heap[iterator][2].vars[i] - round(
+                            heap[iterator][2].vars[i]
+                        )
+                        tolerance = abs(float(tolerance))
+                        # The variable with the highest variance is selected where the ceiling
+                        # and floor constraints will be applied
+                        if maximum_tolerance < tolerance:
+                            maximum_tolerance = tolerance
+                            selection_variable = i
+
+                    # Create the floor restriction for the lower branch
+                    lower_branch = heap[iterator][2].branch_floor(
+                        root.vars[selection_variable]
+                    )
+
+                    # Checks if PICOS is able to calculate an optimal solution
+                    try:
+                        lower_branch.prob.solve()
+
+                    # Outputs a pruned branch that does not need to be explored further
+                    except RuntimeError:
+                        print("Pruned Solution Found")
+
+                    # Adds the new and previous subjective constraints in the heap
+                    else:
+                        heappush(heap, (res, next(counter), lower_branch))
+
+                    upper_branch = heap[iterator][2].branch_ceil(
+                        root.vars[selection_variable]
+                    )
+
+                    # Checks if PICOS is able to calculate an optimal solution
+                    try:
+                        upper_branch.prob.solve()
+
+                    # Outputs a pruned branch that does not need to be explored further
+                    except RuntimeError:
+                        print("Pruned Solution Found")
+
+                    # Adds the new and previous subjective constraints in the heap
+                    else:
+                        heappush(heap, (res, next(counter), upper_branch))
+
+                    # Reset the selection variable
+                    selection_variable = None
+
+            # Change the iteration
+            iterator += 1
+
+        # Return the optimal integer solutions once the loop has finished
         return bestres, bestnode_vars
